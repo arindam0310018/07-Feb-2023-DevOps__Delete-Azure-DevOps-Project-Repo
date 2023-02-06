@@ -1,0 +1,94 @@
+trigger:
+  none
+
+######################
+#DECLARE PARAMETERS:-
+######################
+parameters:
+- name: ServiceConnection
+  type: string
+  default: amcloud-cicd-service-connection
+  values:
+  - amcloud-cicd-service-connection
+
+- name: DevOpsOrganisation
+  type: string
+  default: https://dev.azure.com/ArindamMitra0251
+  values:
+  - https://dev.azure.com/ArindamMitra0251
+
+- name: DevOpsProjName
+  type: string
+  default: ArindamMitra
+  values:
+  - ArindamMitra
+
+- name: PAT
+  type: object
+  default: <Please Provide the PAT Value Here>
+
+- name: RepoName
+  type: object
+  default: <Please Provide the Repo Name Here>
+
+######################
+#DECLARE BUILD AGENT:-
+######################
+pool:
+  vmImage: 'ubuntu-latest'
+
+###################
+#DECLARE STAGES:-
+###################
+stages:
+
+- stage: AZ_DEVOPS_DELETE_REPO
+  jobs:
+  - job: DELETE_REPO
+    displayName: DELETE REPO
+    steps:
+
+########################################################
+# Install Az DevOps CLI Extension in the Build Agent:-
+#######################################################
+    - task: AzureCLI@1
+      displayName: INSTALL DEVOPS CLI EXTENSION
+      inputs:
+        azureSubscription: '${{ parameters.ServiceConnection }}'
+        scriptType: ps
+        scriptLocation: inlineScript
+        inlineScript: |
+          az extension add --name azure-devops
+          az extension show --name azure-devops --output table
+
+###############################################################
+# Help Option of Az DevOps CLI Extension in the Build Agent:-
+###############################################################
+    - task: PowerShell@2
+      displayName: HELP OPTION OF AZ DEVOPS CLI
+      inputs:
+        targetType: 'inline'
+        script: |
+          az devops -h
+
+#############################################
+# Display Az DevOps PAT in the Build Agent:-
+#############################################
+    - task: CmdLine@2
+      displayName: DISPLAY PAT
+      inputs:
+        script: |
+         echo "PAT TOKEN IS: ${{ parameters.PAT }}"
+
+###########################
+# Create DevOps Project:-
+###########################
+    - task: PowerShell@2
+      displayName: DELETE REPO
+      inputs:
+        targetType: 'inline'
+        script: |
+         echo "${{ parameters.PAT }}" | az devops login
+         az devops configure --defaults organization=${{ parameters.DevOpsOrganisation }} project=${{ parameters.DevOpsProjName }}
+         $repoid = az repos show --repository ${{ parameters.RepoName }} --query "id" -o tsv
+         az repos delete --id $repoid --yes
