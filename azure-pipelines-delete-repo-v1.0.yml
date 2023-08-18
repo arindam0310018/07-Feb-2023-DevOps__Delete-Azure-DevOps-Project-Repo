@@ -1,0 +1,154 @@
+trigger:
+  none
+
+######################
+#DECLARE PARAMETERS:-
+######################
+parameters:
+- name: DevOpsOrganisation
+  type: string
+  default: https://dev.azure.com/ArindamMitra0251
+  values:
+  - https://dev.azure.com/ArindamMitra0251
+
+- name: DevOpsProjName
+  type: string
+  default: ArindamMitra
+  values:
+  - ArindamMitra
+
+- name: KVNAME
+  type: string
+  default: ampockv
+  values:
+  - ampockv
+
+- name: RepoName
+  type: object
+  default: AM400
+
+######################
+#DECLARE VARIABLES:-
+######################
+variables:
+  ServiceConnection: amcloud-cicd-service-connection
+  BuildAgent: ubuntu-latest
+  envName: NonProd
+  
+######################
+#DECLARE BUILD AGENT:-
+######################
+pool:
+  vmImage: $(BuildAgent)
+
+###################
+#DECLARE STAGES:-
+###################
+stages:
+
+#######################################
+#STAGE 1: VALIDATE DEVOPS REPOSITORY:-
+#######################################
+- stage: Az_DevOps_Validate_Repo
+  jobs:
+  - job: Az_DevOps_Validate_Repo
+    displayName: Az DevOps Validate Repository
+    steps:
+########################################################
+# Install Az DevOps CLI Extension in the Build Agent:-
+#######################################################
+    - task: AzureCLI@1
+      displayName: Install Devops CLI Extension
+      inputs:
+        azureSubscription: '$(ServiceConnection)'
+        scriptType: ps
+        scriptLocation: inlineScript
+        inlineScript: |
+          az extension add --name azure-devops
+          az extension show --name azure-devops --output table 
+
+###############################################################
+# Help Option of Az DevOps CLI Extension in the Build Agent:-
+###############################################################
+    - task: PowerShell@2
+      displayName: Help option of Az DevOps CLI
+      inputs:
+        targetType: 'inline'
+        script: |
+          az devops -h
+
+################################        
+# Download Keyvault Secrets:-
+################################
+    - task: AzureKeyVault@2
+      displayName: Fetch all Secrets from Keyvault
+      inputs:
+        azureSubscription: '$(ServiceConnection)'
+        KeyVaultName: '${{ parameters.KVNAME }}'
+        SecretsFilter: '*'
+        RunAsPreJob: false
+
+############################################
+# Validate Repository in DevOps Project:-
+############################################
+    - task: PowerShell@2
+      displayName: Validate Repo Name
+      inputs:
+        targetType: 'inline'
+        script: |
+         echo "$(PAT)" | az devops login
+         az devops configure --defaults organization=${{ parameters.DevOpsOrganisation }} project=${{ parameters.DevOpsProjName }}
+         $reponame = az repos show --repository ${{ parameters.RepoName }} --query "name" -o tsv
+         if ($reponame -eq "${{ parameters.RepoName }}") {
+              echo "#####################################################"
+              echo "Repository ${{ parameters.RepoName }} exists!!!"
+              echo "#####################################################"              
+            }
+            else {
+              echo "#############################################################"
+              echo "Repository ${{ parameters.RepoName }} DOES NOT exists!!!"
+              echo "#############################################################"
+              exit 1
+            }
+
+#####################################
+#STAGE 2: DELETE DEVOPS REPOSITORY:-
+#####################################
+
+- stage: Az_DevOps_Delete_Repo
+  condition: |
+     and(succeeded(), 
+       eq(variables['build.sourceBranch'], 'refs/heads/main')
+     )
+  jobs:
+  - deployment: 
+    displayName: Az DevOps Delete Repository
+    environment: '$(envName)'
+    pool:
+      vmImage: $(BuildAgent)
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+################################        
+# Download Keyvault Secrets:-
+################################
+          - task: AzureKeyVault@2
+            displayName: Fetch all Secrets from Keyvault
+            inputs:
+              azureSubscription: '$(ServiceConnection)'
+              KeyVaultName: '${{ parameters.KVNAME }}'
+              SecretsFilter: '*'
+              RunAsPreJob: false
+          - task: PowerShell@2
+            displayName: Delete Repo
+            inputs:
+              targetType: 'inline'
+              script: |
+                echo "$(PAT)" | az devops login
+                az devops configure --defaults organization=${{ parameters.DevOpsOrganisation }} project=${{ parameters.DevOpsProjName }}
+                $repoid = az repos show --repository ${{ parameters.RepoName }} --query "id" -o tsv
+                az repos delete --id $repoid --yes
+                echo "#############################################################"
+                echo "Repository ${{ parameters.RepoName }} Deleted Successfully!!!"
+                echo "#############################################################"
